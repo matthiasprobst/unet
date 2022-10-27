@@ -24,25 +24,27 @@ logger = logging.getLogger('test')
 hydra.verbose = True
 
 
-def train_fn(loader, model, optimizer, loss_fn, scaler, device):
+def train_fn(loader, model, optimizer, loss_fn, scaler, device) -> float:
     """train function"""
     loop = tqdm(loader)
+
     for batch_idx, (data, targets) in enumerate(loop):
+        data = data.to(device=device)
         targets = targets.float().to(device=device)
 
-    # foward
-    with torch.cuda.amp.autocast():
-        predictions = model(data)
-        loss = loss_fn(predictions, targets)
+        # foward
+        with torch.cuda.amp.autocast():
+            predictions = model(data)
+            loss = loss_fn(predictions, targets)
 
-    # backward
-    optimizer.zero_grad()
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
+        # backward
+        optimizer.zero_grad()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
-    # update tqdm loop
-    loop.set_postfix(loss=loss.item())
+        # update tqdm loop
+        loop.set_postfix(loss=loss.item())
     return loss.item()
 
 
@@ -92,6 +94,7 @@ class Case:
             batch_size=self._config.BATCH_SIZE
         )
 
+        torch.cpu.amp.autocast_mode
         self.scaler = torch.cuda.amp.GradScaler()
 
         run_txt_filename = 'loss/loss.txt'

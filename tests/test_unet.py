@@ -98,8 +98,6 @@ class TestUNet(unittest.TestCase):
         assert ds[0][0].shape == (3, *image_size)
         assert ds[0][1].shape == (1, *image_size)
 
-        with open('conf/hyperparameters.yml', 'r') as f:
-            cfg = omegaconf.OmegaConf.load(f)
-
+        cfg = unet.utils.load_hyperparameters('conf/hyperparameters.yml')
         case = unet.Case(cfg, 'testrun')
         case.run()

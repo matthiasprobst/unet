@@ -5,6 +5,7 @@ from typing import Dict
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
+import omegaconf
 import torch
 import yaml
 from torch.utils.data import DataLoader
@@ -30,23 +31,10 @@ def rgb_to_gray(img: np.ndarray):
     return np.dot(img[...], RGB_WEIGHTS)
 
 
-class HyperParameters:
-    def __init__(self, _dict):
-        self._dict = _dict
-        self._dict['DATA_DIR'] = str(pathlib.Path(__file__).parent.absolute() / self._dict['DATA_DIR'])
-
-    def __getattr__(self, item):
-        if item in self._dict:
-            return self._dict[item]
-        return self.__getattribute__(item)
-
-    def __getitem__(self, item):
-        return self._dict[item]
-
-
-def load_hyperparameters(filename) -> HyperParameters:
-    with open(filename) as f:
-        return HyperParameters(yaml.load(f, Loader=LOADER))
+def load_hyperparameters(yaml_filename) -> omegaconf.DictConfig:
+    """Read a yaml file with package omegaconf and return as type DictConfg"""
+    with open(yaml_filename, 'r') as f:
+        return omegaconf.OmegaConf.load(f)
 
 
 def get_loaders(train_filepath: pathlib.Path, valid_filepath: pathlib.Path, batch_size: int, num_workers=4,

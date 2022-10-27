@@ -11,6 +11,7 @@ valid_filename: ../tests/data/cells/valid.hdf
 features:
 - 11
 - 11
+loss_fn: mse
 up:
   stride: 1
   kernel_size: 3

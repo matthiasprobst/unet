@@ -19,13 +19,5 @@ class DatasetLoader(Dataset):
         return self.images[item, ...], self.density[item, ...]
 
 
-def test():
-    import h5py
-    with h5py.File('cell/train.h5') as h5:
-        ds = DatasetLoader(h5['images'][:], h5['labels'][:])
-    assert ds[0][0].shape == (256, 256)
-    assert ds[0][1].shape == (256, 256)
-
-
 if __name__ == '__main__':
     test()

@@ -1,6 +1,6 @@
 import torch
-import torch.nn as nn
 import torchvision.transforms.functional as TF
+from torch import nn
 
 
 class ConvUp(nn.Module):
@@ -44,7 +44,7 @@ class MultiConv(nn.Module):
             nn.BatchNorm2d(num_features=out_channels),
             nn.ReLU(inplace=False),
         ]
-        for i in range(N - 1):
+        for _ in range(N - 1):
             convs.append(
                 nn.Conv2d(
                     in_channels=out_channels,
@@ -60,7 +60,7 @@ class MultiConv(nn.Module):
             convs.append(
                 nn.ReLU(inplace=False)
             )
-        self.conv = nn.Sequential(*[c for c in convs])
+        self.conv = nn.Sequential(*convs)
 
     def forward(self, x):
         """Forward method"""

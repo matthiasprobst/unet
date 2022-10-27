@@ -1,18 +1,15 @@
 import pathlib
-
-import matplotlib
-import matplotlib.pyplot as plt
-
-matplotlib.use('TkAgg')
 import re
+from typing import Dict
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
 from torch.utils.data import DataLoader
-from dataset import DatasetLoader
-from typing import Dict
+
+from .dataset import DatasetLoader
 
 LOADER = yaml.SafeLoader
 LOADER.add_implicit_resolver(
@@ -52,9 +49,14 @@ def load_hyperparameters(filename) -> HyperParameters:
         return HyperParameters(yaml.load(f, Loader=LOADER))
 
 
-def get_loaders(datadir: str, batch_size: int, num_workers=4, pin_memory=True):
-    with h5py.File(f'{datadir}/train.h5') as h5:
-        if 'cell' in datadir:
+def get_loaders(train_filepath: pathlib.Path, valid_filepath: pathlib.Path, batch_size: int, num_workers=4,
+                pin_memory=True):
+    """Load data from HDF5"""
+    train_filepath = pathlib.Path(train_filepath)
+    valid_filepath = pathlib.Path(valid_filepath)
+    datadir = train_filepath.parent
+    with h5py.File(train_filepath) as h5:
+        if 'cell' in datadir.name:
             images = np.stack([rgb_to_gray(h5['images'][i, ...].T).T for i in range(h5['images'].shape[0])])
             images = images.reshape((images.shape[0], 1, *images.shape[1:]))
         else:
@@ -69,8 +71,8 @@ def get_loaders(datadir: str, batch_size: int, num_workers=4, pin_memory=True):
         shuffle=True,
     )
 
-    with h5py.File(f'{datadir}/valid.h5') as h5:
-        if 'cell' in datadir:
+    with h5py.File(valid_filepath) as h5:
+        if 'cell' in datadir.name:
             images = np.stack([rgb_to_gray(h5['images'][i, ...].T).T for i in range(h5['images'].shape[0])])
             images = images.reshape((images.shape[0], 1, *images.shape[1:]))
         else:

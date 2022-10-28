@@ -135,10 +135,10 @@ class Case:
         stp_file = pathlib.Path.cwd() / 'stp'
         with SummaryWriter() as writer:
             for epoch in range(self._config.NUM_EPOCHS):
+                logger.info('Entering epoch %i/%i', epoch, self._config.NUM_EPOCHS)
                 if stp_file.exists():
                     logger.info('Found stop signal. Not running epoch %s', epoch)
                     break
-                logger.info('Epoch %s', epoch)
                 loss = train_fn(
                     self.train_loader,
                     self.model,
@@ -150,7 +150,7 @@ class Case:
                 writer.add_scalar('Loss/train', loss, epoch)
                 with open(self.paths['loss'] / 'loss.txt', 'a') as f:
                     f.write(f'\n{epoch}, {loss}')
-                logger.info('Loss: %f', loss)
+                logger.info(f'Epoch %i/%i: Loss: %f', epoch, self._config.NUM_EPOCHS, loss)
 
                 # check accuracy:
                 err_dict = evaluate_accuracy(self.val_loader, self.model, self._config.device)

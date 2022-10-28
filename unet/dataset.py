@@ -1,3 +1,5 @@
+"""Sub package containing the dataset loader class"""
+
 import numpy as np
 from torch.utils.data import Dataset
 
@@ -17,7 +19,3 @@ class DatasetLoader(Dataset):
         if self.transform is not None:
             raise NotImplementedError('Transform is not available yet')
         return self.images[item, ...], self.density[item, ...]
-
-
-if __name__ == '__main__':
-    test()

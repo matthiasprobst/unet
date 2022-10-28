@@ -90,10 +90,11 @@ class TestUNet(unittest.TestCase):
     def test_unet(self):
         # get the test data
         image_size = (32, 32)
-        get_cell_data(image_size=image_size, force=False)
+        get_cell_data(image_size=image_size, force=True)
 
         with h5py.File('data/cells/train.hdf') as h5:
             ds = DatasetLoader(h5['images'][:], h5['labels'][:])
+            image_size = h5['images'].shape[2:]
 
         assert ds[0][0].shape == (3, *image_size)
         assert ds[0][1].shape == (1, *image_size)

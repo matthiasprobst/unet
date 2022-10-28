@@ -1,6 +1,6 @@
 import pathlib
 import re
-from typing import Dict
+from typing import Dict, Tuple, Callable, Union, List
 
 import h5py
 import matplotlib.pyplot as plt
@@ -10,6 +10,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
+from ._logger import logger
 from .dataset import DatasetLoader
 
 LOADER = yaml.SafeLoader
@@ -37,19 +38,24 @@ def load_hyperparameters(yaml_filename) -> omegaconf.DictConfig:
         return omegaconf.OmegaConf.load(f)
 
 
-def get_loaders(train_filepath: pathlib.Path, valid_filepath: pathlib.Path, batch_size: int, num_workers=4,
-                pin_memory=True):
+def get_loaders(train_filepath: pathlib.Path,
+                valid_filepath: pathlib.Path,
+                batch_size: int, num_workers: int = 4,
+                pin_memory: bool = True,
+                make_gray_scale: bool = True) -> Tuple[DataLoader, DataLoader]:
     """Load data from HDF5"""
     train_filepath = pathlib.Path(train_filepath)
     valid_filepath = pathlib.Path(valid_filepath)
-    datadir = train_filepath.parent
+
     with h5py.File(train_filepath) as h5:
-        if 'cell' in datadir.name:
-            images = np.stack([rgb_to_gray(h5['images'][i, ...].T).T for i in range(h5['images'].shape[0])])
+        _images = h5['images'][:]
+        if _images.shape[1] > 1 and make_gray_scale:
+            images = np.stack([rgb_to_gray(_images[i, ...].T).T for i in range(_images.shape[0])])
             images = images.reshape((images.shape[0], 1, *images.shape[1:]))
         else:
-            images = h5['images'][:]
-        train_ds = DatasetLoader(images.astype(np.float32), h5['labels'][...].astype(np.float32))
+            images = _images
+        train_ds = DatasetLoader(images.astype(np.float32),
+                                 h5['labels'][:].astype(np.float32))
 
     train_loader = DataLoader(
         train_ds,
@@ -60,12 +66,14 @@ def get_loaders(train_filepath: pathlib.Path, valid_filepath: pathlib.Path, batc
     )
 
     with h5py.File(valid_filepath) as h5:
-        if 'cell' in datadir.name:
-            images = np.stack([rgb_to_gray(h5['images'][i, ...].T).T for i in range(h5['images'].shape[0])])
+        _images = h5['images'][:]
+        if _images.shape[1] > 1 and make_gray_scale:
+            images = np.stack([rgb_to_gray(_images[i, ...].T).T for i in range(_images.shape[0])])
             images = images.reshape((images.shape[0], 1, *images.shape[1:]))
         else:
-            images = h5['images'][:]
-        val_ds = DatasetLoader(images.astype(np.float32), h5['labels'][...].astype(np.float32))
+            images = _images
+        val_ds = DatasetLoader(images.astype(np.float32),
+                               h5['labels'][...].astype(np.float32))
 
     val_loader = DataLoader(
         val_ds,
@@ -78,11 +86,53 @@ def get_loaders(train_filepath: pathlib.Path, valid_filepath: pathlib.Path, batc
 
 
 def save_checkpoint(state, filename="checkpoints/my_checkpoint.pth.tar"):
+    """Save the checkpoint"""
+    logger.debug('Saving checkpoint at %s', filename)
     torch.save(state, filename)
 
 
-def save_predictions_as_imgs(epochidx, loader, model, folder="saved_images/", device="cuda"):
+def _default_prediction_plot(images: np.ndarray,
+                             labels: np.ndarray,
+                             predictions: np.ndarray) -> List[plt.Figure]:
+    """The default way of plotting the prediction
+
+    Parameters
+    ----------
+    images: np.ndarray[n_images, m, ny, nx]
+        Input images
+    labels: np.ndarray[n_images, 1, ny, nx]
+        Label
+    predictions: np.ndarray[n_images, m, ny, nx]
+        Label
+
+    Returns
+    -------
+    figs: List[plt.Figure]
+        List of figures
+    """
+    figs = []
+    for i in range(images.shape[0]):
+        fig, axs = plt.subplots(1, 3, sharex=True, sharey=True)
+        axs[0].imshow(images[i, 0, ...], cmap='gray', vmin=0, vmax=1)
+        axs[1].imshow(labels[i, ...], cmap='gray', vmin=0, vmax=1)
+        axs[2].imshow(predictions[i, ...], cmap='gray', vmin=0, vmax=1)
+        axs[0].set_aspect('equal')
+        plt.draw()
+        figs.append(fig)
+    return figs
+
+
+def save_predictions_as_imgs(epochidx: int,
+                             loader,
+                             model,
+                             fn: Callable = _default_prediction_plot,
+                             folder: Union[pathlib.Path, str] = "saved_images/",
+                             device: str = "cuda",
+                             **fn_kwargs):
+    """Save prediction(s) as image(s)"""
+    # set model to evaluation mode
     model.eval()
+
     # get the first batch only:
     input_images, true_denisty_map = next(iter(loader))
     input_images = input_images.to(device=device)
@@ -93,16 +143,23 @@ def save_predictions_as_imgs(epochidx, loader, model, folder="saved_images/", de
     predicted_density_map = preds.cpu().detach().numpy().squeeze()
     true_denisty_maps = true_denisty_maps.cpu().detach().numpy().squeeze()
 
-    fig, axs = plt.subplots(3, input_images.shape[0], sharex=True, sharey=True)
-    for i in range(input_images.shape[0]):
-        axs[0][i].imshow(input_images[i, 0, ...], cmap='gray', vmin=0, vmax=1)
-        axs[1][i].imshow(true_denisty_maps[i, ...], cmap='gray', vmin=0, vmax=1)
-        axs[2][i].imshow(predicted_density_map[i, ...], cmap='gray', vmin=0, vmax=1)
-    axs[0][0].set_aspect('equal')
-    plt.draw()
-    plt.savefig(pathlib.Path(folder) / f'pred_{epochidx}.png')
-    plt.close()
+    fig = fn(input_images, true_denisty_maps, predicted_density_map, **fn_kwargs)
 
+    if isinstance(fig, (tuple, list)):
+        fig_dir = pathlib.Path(folder) / f'pred_{epochidx:06d}'
+        fig_dir.mkdir(exist_ok=True, parents=True)
+        _fmt = f'0{len(str(len(fig)))}d'
+        for ifig, f in enumerate(fig):
+            f.savefig(fig_dir / f'pred_{ifig:{_fmt}}')
+            plt.close()
+    else:
+        img_path = pathlib.Path(folder) / f'pred_{epochidx:06d}.png'
+        logger.debug('saving prediciton images at %s', img_path)
+
+        fig.savefig(img_path)
+        plt.close()
+
+    # set model to training mode
     model.train()
 
 

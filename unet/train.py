@@ -1,4 +1,3 @@
-import logging
 import pathlib
 import warnings
 from typing import Union
@@ -13,6 +12,7 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from ._logger import logger
 from .model import UNET
 from .utils import get_loaders, save_checkpoint, save_predictions_as_imgs, evaluate_accuracy
 
@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore")
 matplotlib.use('TkAgg')
 
 file_dir = pathlib.Path(__file__).parent
-logger = logging.getLogger('test')
+
 hydra.verbose = True
 
 
@@ -59,7 +59,10 @@ def train_fn(loader, model, optimizer, loss_fn, scaler, device) -> float:
 
 
 class Case:
-    def __init__(self, cfg: DictConfig, working_dir: Union[pathlib.Path, None]):
+    """Case class to control training and validation (tbd)"""
+
+    def __init__(self, cfg: DictConfig, working_dir: Union[pathlib.Path, None],
+                 rm_old_files: bool = False):
         if working_dir is None:
             _working_dir = pathlib.Path().cwd()
         else:
@@ -68,7 +71,12 @@ class Case:
                       'loss': _working_dir / 'loss',
                       'checkpoints': _working_dir / 'checkpoints',
                       'prediced_labels': _working_dir / 'prediced_labels'}
-        for path in self.paths.values():
+        for pname, path in self.paths.items():
+            if pname != 'working_dir' and path.exists():
+                if rm_old_files:
+                    path.unlink()
+                raise RuntimeError('Seems that the case already exists. '
+                                   'Consider passing parameter "rm_old_files=True"')
             path.mkdir(parents=True, exist_ok=True)
         self._config = cfg
 
@@ -147,12 +155,12 @@ class Case:
                 # check accuracy:
                 err_dict = evaluate_accuracy(self.val_loader, self.model, self._config.device)
                 writer.add_scalar('Accuracy/mean_abs_err', err_dict['mean_abs_err'], epoch)
-                logger.info(f'MAE: {err_dict["mean_abs_err"],}')
+                logger.info('MAE: %f', err_dict["mean_abs_err"])
 
                 if self.current_best_mean_abs_err > err_dict['mean_abs_err']:
                     logger.info('Generating true-vs-pediction plot')
                     fig = plt.figure()
-                    plt.title(f'epoch {epoch}')
+                    plt.title(f'Epoch {epoch}')
                     plt.plot(err_dict['true_counts'], err_dict['predicted_counts'], 'k+')
                     plt.plot([min(err_dict['true_counts']), max(err_dict['true_counts'])],
                              [min(err_dict['true_counts']), max(err_dict['true_counts'])], 'k--')
@@ -169,7 +177,6 @@ class Case:
                             "optimizer": self.optimizer.state_dict()
                         }
                         checkpoint_file = self.paths['checkpoints'] / f'cp{epoch}.pth.tar'
-                        logger.info('Saving checkoint: %s', checkpoint_file)
                         save_checkpoint(checkpoint, filename=checkpoint_file)
 
                     # print some examples to a folder
@@ -181,14 +188,3 @@ class Case:
                         folder=self.paths['prediced_labels'],
                         device=self._config.device
                     )
-
-
-@hydra.main(config_path='../tests/conf', config_name='hyperparameters.yml')
-def main(cfg: DictConfig) -> None:
-    """Main function running the unet base on the configuration"""
-    case = Case(cfg, None)
-    case.run()
-
-
-if __name__ == '__main__':
-    main()

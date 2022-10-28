@@ -6,7 +6,6 @@ from typing import List, Tuple
 
 import h5py
 import numpy as np
-import omegaconf
 import wget
 from PIL import Image
 from scipy.ndimage import gaussian_filter
@@ -33,11 +32,17 @@ def get_and_unzip(url: str, location: str = "."):
     os.remove(dataset.filename)
 
 
-def get_cell_data(image_size: Tuple[int] = None, force: bool = False):
+def get_cell_data(image_size: Tuple[int] = None, force: bool = False,
+                  train_valid_portions: Tuple[float, float] = (80., 20.,)):
     """get cell data which is open access
     Code is mostly copied from
     https://github.com/NeuroSYS-pl/objects_counting_dmap/blob/7d91bb865fe00f1c8eca17bcdac693162a981c77/get_data.py#L105
     """
+
+    if np.sum(train_valid_portions) not in (1, 100):
+        raise ValueError('The portions for train/valid/test data is wrong as it does not sum up to 100%!')
+    if np.sum(train_valid_portions) == 100:
+        train_valid_portions = tuple(np.array(train_valid_portions) / 100)
 
     if pathlib.Path('data/cells/train.hdf').exists() and pathlib.Path('data/cells/valid.hdf').exists() and not force:
         return
@@ -51,6 +56,8 @@ def get_cell_data(image_size: Tuple[int] = None, force: bool = False):
 
     sorted_image_list = sorted(pathlib.Path('data/cells').glob('*cell.png'))
     sorted_label_list = sorted(pathlib.Path('data/cells').glob('*dots.png'))
+    n_images = len(sorted_image_list)
+    assert n_images == len(sorted_label_list)
 
     def write_to_h5(h5file: h5py.File, image_list: List, label_list: List):
         """write the hdf5 file"""
@@ -58,7 +65,7 @@ def get_cell_data(image_size: Tuple[int] = None, force: bool = False):
             image = np.array(Image.open(img_path), dtype=np.float32) / 255
             transposed_image = np.transpose(image, (2, 0, 1))
             if image_size is not None:
-                transposed_image = transposed_image[:, 0:image_size[0], 0:image_size[1]]
+                transposed_image = transposed_image[:, 0:image_size[1], 0:image_size[0]]
             if 'images' not in h5file:
                 h5file.create_dataset('images', shape=(len(image_list), *transposed_image.shape))
 
@@ -70,7 +77,7 @@ def get_cell_data(image_size: Tuple[int] = None, force: bool = False):
             label = gaussian_filter(label, sigma=(1, 1), order=0)
 
             if image_size is not None:
-                label = label[0:image_size[0], 0:image_size[1]]
+                label = label[0:image_size[1], 0:image_size[0]]
 
             if 'labels' not in h5file:
                 h5file.create_dataset('labels', shape=(len(image_list), 1, *label.shape))
@@ -79,17 +86,22 @@ def get_cell_data(image_size: Tuple[int] = None, force: bool = False):
             h5file['images'][i] = transposed_image
             h5file['labels'][i, 0] = label
 
+    ntrain = int(n_images * train_valid_portions[0])
+    nvalid = int(n_images * train_valid_portions[1])
+
+    assert np.sum((ntrain, nvalid)) <= n_images
+
     with h5py.File('data/cells/train.hdf', 'w') as h5:
-        write_to_h5(h5, sorted_image_list[0:150], sorted_label_list[0:150])
+        write_to_h5(h5, sorted_image_list[0:ntrain], sorted_label_list[0:ntrain])
     with h5py.File('data/cells/valid.hdf', 'w') as h5:
-        write_to_h5(h5, sorted_image_list[150:], sorted_label_list[150:])
+        write_to_h5(h5, sorted_image_list[ntrain:], sorted_label_list[ntrain:])
 
 
 class TestUNet(unittest.TestCase):
 
     def test_unet(self):
         # get the test data
-        image_size = (32, 32)
+        image_size = None
         get_cell_data(image_size=image_size, force=True)
 
         with h5py.File('data/cells/train.hdf') as h5:
@@ -99,6 +111,6 @@ class TestUNet(unittest.TestCase):
         assert ds[0][0].shape == (3, *image_size)
         assert ds[0][1].shape == (1, *image_size)
 
-        cfg = unet.utils.load_hyperparameters('conf/hyperparameters.yml')
+        cfg = unet.utils.load_hyperparameters('conf/hyperparameters.yaml')
         case = unet.Case(cfg, 'testrun')
         case.run()

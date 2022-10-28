@@ -98,7 +98,7 @@ class DoubleConv(nn.Module):
 class UNET(nn.Module):
     def __init__(
             self,
-            in_channels=1,
+            in_channels=1,  # e.g. 1 for gray scale 3 for rgb images
             out_channels=1,
             features=[64, 128, 256, 512],
             up_stride: int = 1,

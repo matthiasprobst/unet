@@ -1,6 +1,7 @@
 import pathlib
 import warnings
-from typing import Union
+from dataclasses import dataclass
+from typing import Union, Dict, Tuple
 
 import hydra
 import matplotlib
@@ -14,7 +15,11 @@ from tqdm import tqdm
 
 from ._logger import logger
 from .model import UNET
-from .utils import get_loaders, save_checkpoint, save_predictions_as_imgs, evaluate_accuracy
+from .utils import (get_loaders,
+                    save_checkpoint,
+                    save_predictions_as_imgs,
+                    load_checkpoint,
+                    PredictionPlot)
 
 warnings.filterwarnings("ignore")
 matplotlib.use('TkAgg')
@@ -24,136 +29,248 @@ file_dir = pathlib.Path(__file__).parent
 hydra.verbose = True
 
 
-def train_fn(loader, model, optimizer, loss_fn, scaler, device) -> float:
-    """train function"""
+def train_one_epoch(loader, model, optimizer, loss_fn, scaler, device) -> float:
+    """Run training on one epoch"""
     loop = tqdm(loader)
-
+    model.train()
+    running_loss = 0.
     for data, targets in loop:
         data = data.to(device=device)
         targets = targets.float().to(device=device)
 
-        if device == 'cuda':
-            # foward
-            with torch.cuda.amp.autocast():
-                predictions = model(data)
-                loss = loss_fn(predictions, targets)
+        # Zero gradients for every batch
+        optimizer.zero_grad()
 
-            # backward
-            optimizer.zero_grad()
+        # foward
+        # make predition:
+        predictions = model(data)
+        # compute loss
+        loss = loss_fn(predictions, targets)
+        running_loss += loss.item()
+        # backward
+        if device == 'cuda':
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            # foward
-            predictions = model(data)
-            loss = loss_fn(predictions, targets)
-
-            # backward
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
         # update tqdm loop
-        loop.set_postfix(loss=loss.item())
-    return loss.item()
+        loop.set_postfix(train_loss=loss.item())
+
+    return running_loss / len(loader)
 
 
+def validate_one_epoch(loader, model, loss_fn, device) -> Tuple[float, Dict]:
+    """Runs validation and compute errors"""
+    loop = tqdm(loader)
+    model.eval()
+    true_counts = []
+    predicted_counts = []
+
+    running_loss = 0.
+    with torch.no_grad():
+        for _image, _density_map in loader:
+            image = _image.to(device)
+            density_map = _density_map.to(device)
+            # get prediction:
+            predicted_density_map = model(image)
+            validation_loss = loss_fn(predicted_density_map, density_map)
+            running_loss += validation_loss
+
+            for true, predicted in zip(density_map, predicted_density_map):
+                true_counts.append(torch.sum(true).item() / 100)
+                predicted_counts.append(torch.sum(predicted).item() / 100)
+
+            # update tqdm loop
+            loop.set_postfix(valid_loss=validation_loss.item())
+
+    size = np.multiply(*tuple(image.shape[-2:]))
+    err = [true - predicted for true, predicted in zip(true_counts, predicted_counts)]
+    abs_err = [abs(error) for error in err]
+    mean_err = sum(err) / size
+    mean_abs_err = sum(abs_err) / size
+    std = np.array(err).std()
+    return running_loss / len(loader), dict(true_counts=true_counts,
+                                            predicted_counts=predicted_counts,
+                                            err=err,
+                                            abs_err=abs_err,
+                                            mean_err=mean_err,
+                                            mean_abs_err=mean_abs_err,
+                                            std=std)
+
+
+@dataclass
 class Case:
     """Case class to control training and validation (tbd)"""
+    cfg: DictConfig
+    working_dir: Union[pathlib.Path, None] = None
+    loss_dir: Union[pathlib.Path, None] = None
+    checkpoints_dir: Union[pathlib.Path, None] = None
+    plots_dir: Union[pathlib.Path, None] = None
+    prediced_labels_dir: Union[pathlib.Path, None] = None
+    current_best_mean_abs_err: float = np.infty
+    current_epoch: int = 0
+    prediction_plot_class: PredictionPlot = PredictionPlot
 
-    def __init__(self, cfg: DictConfig, working_dir: Union[pathlib.Path, None],
-                 rm_old_files: bool = False):
-        if working_dir is None:
-            _working_dir = pathlib.Path().cwd()
+    def __post_init__(self):
+        """post init call"""
+        if self.working_dir is None:
+            self.working_dir = pathlib.Path().cwd()
         else:
-            _working_dir = pathlib.Path(working_dir)
-        self.paths = {'working_dir': _working_dir,
-                      'loss': _working_dir / 'loss',
-                      'checkpoints': _working_dir / 'checkpoints',
-                      'prediced_labels': _working_dir / 'prediced_labels'}
-        for pname, path in self.paths.items():
-            if pname != 'working_dir' and path.exists():
-                if rm_old_files:
-                    path.unlink()
-                raise RuntimeError('Seems that the case already exists. '
-                                   'Consider passing parameter "rm_old_files=True"')
-            path.mkdir(parents=True, exist_ok=True)
-        self._config = cfg
+            self.working_dir = pathlib.Path(self.working_dir)
 
-        self.model = UNET(in_channels=1,
-                          out_channels=1,
-                          features=self._config.features,
-                          up_stride=self._config.up.stride,
-                          up_kernel_size=self._config.up.kernel_size,
-                          down_stride=self._config.down.stride,
-                          down_kernel_size=self._config.down.kernel_size,
-                          use_upsample=self._config.use_upsample).to(self._config.device)
-        if self._config.loss_fn.lower() == 'mse':
-            self.loss_fn = nn.MSELoss()  # loss function
-        elif self._config.loss_fn.lower() == 'bcewithlogits':
-            self.loss_fn = nn.BCEWithLogitsLoss()  # loss function
+        if self.loss_dir is None:
+            self.loss_dir = self.working_dir / 'loss'
         else:
-            raise ValueError(f'Unknown loss function {self._config.loss_fn}')
-        if self._config.optimizer.name == 'Adam':
-            self.optimizer = torch.optim.Adam(self.model.parameters(),
-                                              lr=self._config.optimizer.learning_rate)
-        elif self._config.optimizer.name == 'SGD':
-            self.optimizer = torch.optim.SGD(self.model.parameters(),
-                                             lr=self._config.optimizer.learning_rate,
-                                             momentum=self._config.optimizer.opts.SGD.momentum,
-                                             weight_decay=self._config.optimizer.opts.SGD.weight_decay)
+            self.loss_dir = pathlib.Path(self.working_dir)
+
+        if self.checkpoints_dir is None:
+            self.checkpoints_dir = self.working_dir / 'checkpoints'
         else:
-            raise ValueError(f'Unknown optimizer: {self._config.optimizer}')
+            self.checkpoints_dir = pathlib.Path(self.working_dir)
 
-        train_filename = pathlib.Path(self._config.train_filename).resolve()
-        if not train_filename.exists():
-            raise FileNotFoundError(f'Cannot find training file: {train_filename}')
-        valid_filename = pathlib.Path(self._config.valid_filename).resolve()
-        if not valid_filename.exists():
-            raise FileNotFoundError(f'Cannot find validation file: {valid_filename}')
-        self.train_loader, self.val_loader = get_loaders(
-            train_filename,
-            valid_filename,
-            batch_size=self._config.BATCH_SIZE
-        )
+        if self.prediced_labels_dir is None:
+            self.prediced_labels_dir = self.working_dir / 'prediced_labels'
+        else:
+            self.prediced_labels_dir = pathlib.Path(self.working_dir)
 
-        self.scaler = torch.cuda.amp.GradScaler()
-
-        run_txt_filename = 'loss/loss.txt'
-        with open(self.working_dir / run_txt_filename, 'w') as f:
-            f.write('epoch,loss')
-
-        self.current_best_mean_abs_err = np.infty
+        if self.plots_dir is None:
+            self.plots_dir = self.working_dir / 'plots'
+        else:
+            self.plots_dir = pathlib.Path(self.working_dir)
 
     @property
-    def working_dir(self) -> pathlib.Path:
-        """Return the working dir"""
-        return self.paths['working_dir']
+    def is_empty_case(self) -> bool:
+        """if directory paths don't exist, case most likely is empty"""
+        for _dir in (self.working_dir, self.loss_dir, self.checkpoints_dir, self.prediced_labels_dir):
+            if not _dir.exists():
+                return True
 
-    def run(self) -> None:
+    @property
+    def paths(self) -> Dict:
+        """Return paths dictionary of case"""
+        return dict(working_dir=self.working_dir,
+                    loss_dir=self.loss_dir,
+                    checkpoints_dir=self.checkpoints_dir,
+                    prediced_labels_dir=self.prediced_labels_dir,
+                    plots_dir=self.plots_dir,
+                    )
+
+    def set_up_case(self):
+        """creating folder structure"""
+        for path in self.paths.values():
+            path.mkdir(parents=True, exist_ok=True)
+
+    def reset_paths(self):
+        """deleting case folder structure"""
+        for pname, path in self.paths.items():
+            if pname != 'working_dir' and path.exists():
+                path.unlink()
+            path.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def get_latest_checkpoint(self) -> pathlib.Path:
+        """return latest checkpoint"""
+        return sorted(self.checkpoints_dir.glob('*.pth.tar'))[-1]
+
+    def run(self, checkpoint: Union[pathlib.Path, Dict, None] = None) -> None:
         """Start the training"""
+        self.set_up_case()
+
+        # init model:
+        model = UNET(in_channels=1,
+                     out_channels=1,
+                     features=self.cfg.features,
+                     up_stride=self.cfg.up.stride,
+                     up_kernel_size=self.cfg.up.kernel_size,
+                     down_stride=self.cfg.down.stride,
+                     down_kernel_size=self.cfg.down.kernel_size,
+                     use_upsample=self.cfg.use_upsample).to(self.cfg.device)
+        if self.cfg.loss_fn.lower() == 'mse':
+            loss_fn = nn.MSELoss()  # loss function
+        elif self.cfg.loss_fn.lower() == 'bcewithlogits':
+            loss_fn = nn.BCEWithLogitsLoss()  # loss function
+        else:
+            raise ValueError(f'Unknown loss function {self.cfg.loss_fn}')
+        if self.cfg.optimizer.name == 'Adam':
+            optimizer = torch.optim.Adam(model.parameters(),
+                                         lr=self.cfg.optimizer.learning_rate)
+        elif self.cfg.optimizer.name == 'SGD':
+            optimizer = torch.optim.SGD(model.parameters(),
+                                        lr=self.cfg.optimizer.learning_rate,
+                                        momentum=self.cfg.optimizer.opts.SGD.momentum,
+                                        weight_decay=self.cfg.optimizer.opts.SGD.weight_decay)
+        else:
+            raise ValueError(f'Unknown optimizer: {self.cfg.optimizer}')
+
+        train_filename = pathlib.Path(self.cfg.train_filename).resolve()
+        valid_filename = pathlib.Path(self.cfg.valid_filename).resolve()
+
+        for _name, _path in zip(('training', 'validation'),
+                                (train_filename, valid_filename)):
+            logger.debug('Loading %s data from %s', _name, _path)
+            if _path:
+                if not _path.exists():
+                    raise FileNotFoundError(f'Cannot find training file: {_path}')
+
+        train_loader, val_loader = get_loaders(
+            train_filename,
+            valid_filename,
+            num_workers=self.cfg.num_workers,
+            pin_memory=self.cfg.pin_memory,
+            batch_size=self.cfg.batch_size
+        )
+
+        scaler = torch.cuda.amp.GradScaler()
+
+        with open(self.loss_dir / 'loss.txt', 'w') as f:
+            f.write('epoch,loss,training_loss,validation_loss')
+
+        # a stp-file in the cwd will stop the epoch loop
         stp_file = pathlib.Path.cwd() / 'stp'
+
+        if checkpoint is not None:  # resume a run
+            if isinstance(checkpoint, (str, pathlib.Path)):
+                if not pathlib.Path(checkpoint).exists():
+                    raise FileNotFoundError(f'Checkpoint not found: {pathlib.Path(checkpoint).absolute()}')
+            logger.info('Resuming from checkpoint %s', checkpoint)
+            load_checkpoint(checkpoint, model)
+
         with SummaryWriter() as writer:
-            for epoch in range(self._config.NUM_EPOCHS):
-                logger.info('Entering epoch %i/%i', epoch, self._config.NUM_EPOCHS)
+            for epoch in range(self.cfg.num_epochs):
+
+                logger.info('Entering epoch %i/%i', epoch, self.cfg.num_epochs)
+
+                self.current_epoch = epoch
+
                 if stp_file.exists():
                     logger.info('Found stop signal. Not running epoch %s', epoch)
                     break
-                loss = train_fn(
-                    self.train_loader,
-                    self.model,
-                    self.optimizer,
-                    self.loss_fn,
-                    self.scaler,
-                    self._config.device
-                )
-                writer.add_scalar('Loss/train', loss, epoch)
-                with open(self.paths['loss'] / 'loss.txt', 'a') as f:
-                    f.write(f'\n{epoch}, {loss}')
-                logger.info(f'Epoch %i/%i: Loss: %f', epoch, self._config.NUM_EPOCHS, loss)
 
-                # check accuracy:
-                err_dict = evaluate_accuracy(self.val_loader, self.model, self._config.device)
+                # train one epoch and get average loss per batch:
+                average_loss = train_one_epoch(
+                    train_loader,
+                    model,
+                    optimizer,
+                    loss_fn,
+                    scaler,
+                    self.cfg.device
+                )
+                writer.add_scalar('Loss/train', average_loss, epoch)
+                writer.add_scalar('RunningLoss/train', epoch)
+
+                # check accuracy/run validation:
+                validation_average_loss, err_dict = validate_one_epoch(val_loader,
+                                                                       model,
+                                                                       loss_fn,
+                                                                       self.cfg.device)
+
+                logger.info(f'Epoch %i/%i: Training-Loss: %f | Training-Loss: %f',
+                            epoch, self.cfg.num_epochs, average_loss, validation_average_loss)
+                with open(self.loss_dir / 'loss.txt', 'a') as f:
+                    f.write(f'\n{epoch}, {average_loss}, {validation_average_loss}')
                 writer.add_scalar('Accuracy/mean_abs_err', err_dict['mean_abs_err'], epoch)
                 logger.info('MAE: %f', err_dict["mean_abs_err"])
 
@@ -166,25 +283,29 @@ class Case:
                              [min(err_dict['true_counts']), max(err_dict['true_counts'])], 'k--')
                     plt.xlabel('true counts [-]')
                     plt.ylabel('predicted counts [-]')
-                    writer.add_figure('plots/true_vs_predicted', fig, global_step=epoch)
+                    plt.draw()
+                    _fmt = f'0{len(str(self.cfg.num_epochs))}d'
+                    plt.savefig(self.plots_dir / f'true_vs_predicted_{epoch:{_fmt}}', dpi=150)
+                    writer.add_figure(str(self.plots_dir / 'true_vs_predicted'), fig, global_step=epoch)
 
                     self.current_best_mean_abs_err = err_dict['mean_abs_err']
                     # save model
                     logger.info(f'New best mean abs err: {err_dict["mean_abs_err"]}')
-                    if self._config.save_checkpoint:
+                    if self.cfg.save_checkpoint:
                         checkpoint = {
-                            "state_dict": self.model.state_dict(),
-                            "optimizer": self.optimizer.state_dict()
+                            "state_dict": model.state_dict(),
+                            "optimizer": optimizer.state_dict()
                         }
-                        checkpoint_file = self.paths['checkpoints'] / f'cp{epoch}.pth.tar'
+                        checkpoint_file = self.checkpoints_dir / f'cp{epoch}.pth.tar'
                         save_checkpoint(checkpoint, filename=checkpoint_file)
 
                     # print some examples to a folder
                     logger.debug('saving prediction images')
                     save_predictions_as_imgs(
                         epoch,
-                        self.val_loader,
-                        self.model,
-                        folder=self.paths['prediced_labels'],
-                        device=self._config.device
+                        val_loader,
+                        model,
+                        folder=self.prediced_labels_dir,
+                        device=self.cfg.device,
+                        predplot=self.prediction_plot_class
                     )

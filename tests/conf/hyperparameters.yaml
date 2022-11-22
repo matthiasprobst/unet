@@ -6,8 +6,8 @@ pin_memory: true
 load_model: false
 save_checkpoint: true
 use_upsample: false
-train_filename: ../tests/data/cells/train.hdf
-valid_filename: ../tests/data/cells/valid.hdf
+train_filename: ../data/cells/train.hdf
+valid_filename: ../data/cells/valid.hdf
 features:
   - 11
   - 11

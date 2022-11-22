@@ -141,6 +141,9 @@ class Case:
         else:
             self.plots_dir = pathlib.Path(self.working_dir)
 
+        self.cfg['train_filename'] = self.working_dir / self.cfg['train_filename']
+        self.cfg['valid_filename'] = self.working_dir / self.cfg['valid_filename']
+
     @property
     def is_empty_case(self) -> bool:
         """if directory paths don't exist, case most likely is empty"""

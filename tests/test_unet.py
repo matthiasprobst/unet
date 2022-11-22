@@ -14,6 +14,9 @@ import unet
 from unet.dataset import DatasetLoader
 
 __this_dir__ = pathlib.Path(__file__).parent
+print(__this_dir__)
+train_hdf = __this_dir__ / 'data/cells/train.hdf'
+valid_hdf = __this_dir__ / 'data/cells/valid.hdf'
 
 
 def get_and_unzip(url: str, location: str = "."):
@@ -44,18 +47,18 @@ def get_cell_data(image_size: Tuple[int] = None, force: bool = False,
     if np.sum(train_valid_portions) == 100:
         train_valid_portions = tuple(np.array(train_valid_portions) / 100)
 
-    if pathlib.Path('data/cells/train.hdf').exists() and pathlib.Path('data/cells/valid.hdf').exists() and not force:
+    if train_hdf.exists() and valid_hdf.exists() and not force:
         return
 
-    sorted_image_list = sorted(pathlib.Path('data/cells').glob('*cell.png'))
+    sorted_image_list = sorted((__this_dir__ / 'data/cells').glob('*cell.png'))
     if len(sorted_image_list) < 200:
         get_and_unzip(
             'http://www.robots.ox.ac.uk/~vgg/research/counting/cells.zip',
-            location='data/cells'
+            location=__this_dir__ / 'data/cells'
         )
 
-    sorted_image_list = sorted(pathlib.Path('data/cells').glob('*cell.png'))
-    sorted_label_list = sorted(pathlib.Path('data/cells').glob('*dots.png'))
+    sorted_image_list = sorted((__this_dir__ / 'data/cells').glob('*cell.png'))
+    sorted_label_list = sorted((__this_dir__ / 'data/cells').glob('*dots.png'))
     n_images = len(sorted_image_list)
     assert n_images == len(sorted_label_list)
 
@@ -91,9 +94,9 @@ def get_cell_data(image_size: Tuple[int] = None, force: bool = False,
 
     assert np.sum((ntrain, nvalid)) <= n_images
 
-    with h5py.File('data/cells/train.hdf', 'w') as h5:
+    with h5py.File(__this_dir__ / 'data/cells/train.hdf', 'w') as h5:
         write_to_h5(h5, sorted_image_list[0:ntrain], sorted_label_list[0:ntrain])
-    with h5py.File('data/cells/valid.hdf', 'w') as h5:
+    with h5py.File(__this_dir__ / 'data/cells/valid.hdf', 'w') as h5:
         write_to_h5(h5, sorted_image_list[ntrain:], sorted_label_list[ntrain:])
 
 
@@ -104,13 +107,16 @@ class TestUNet(unittest.TestCase):
         image_size = None
         get_cell_data(image_size=image_size, force=True)
 
-        with h5py.File('data/cells/train.hdf') as h5:
+        with h5py.File(__this_dir__ / 'data/cells/train.hdf') as h5:
             ds = DatasetLoader(h5['images'][:], h5['labels'][:])
             image_size = h5['images'].shape[2:]
 
         assert ds[0][0].shape == (3, *image_size)
         assert ds[0][1].shape == (1, *image_size)
 
-        cfg = unet.utils.load_hyperparameters('conf/hyperparameters.yaml')
-        case = unet.Case(cfg, working_dir='object_counting')
+        cfg = unet.utils.load_hyperparameters(__this_dir__ / 'conf/hyperparameters.yaml')
+        case = unet.Case(cfg, working_dir=__this_dir__ / 'object_counting')
         case.run()
+
+        self.assertTrue((__this_dir__ / 'data').exists())
+        self.assertTrue((__this_dir__ / 'runs').exists())

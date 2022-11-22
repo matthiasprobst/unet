@@ -1,0 +1,34 @@
+device: cpu
+batch_size: 8
+num_epochs: 3
+num_workers: 2
+pin_memory: true
+load_model: false
+save_checkpoint: true
+use_upsample: false
+train_filename: ../tests/data/cells/train.hdf
+valid_filename: ../tests/data/cells/valid.hdf
+features:
+  - 64
+  - 128
+  - 256
+loss_fn: mse
+up:
+  stride: 1
+  kernel_size: 3
+down:
+  stride: 1
+  kernel_size: 3
+pooling:
+  kernel_size: 2
+  stride: 2
+bottleneck:
+  kernel_size: 3
+  stride: 1
+optimizer:
+  name: SGD
+  learning_rate: 0.01
+  opts:
+    SGD:
+      momentum: 0.9
+      weight_decay: 0.001

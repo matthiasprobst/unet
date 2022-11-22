@@ -238,7 +238,7 @@ class Case:
             logger.info('Resuming from checkpoint %s', checkpoint)
             load_checkpoint(checkpoint, model)
 
-        with SummaryWriter() as writer:
+        with SummaryWriter(log_dir=self.working_dir) as writer:
             for epoch in range(self.cfg.num_epochs):
 
                 logger.info('Entering epoch %i/%i', epoch, self.cfg.num_epochs)

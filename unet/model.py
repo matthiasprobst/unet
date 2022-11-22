@@ -220,7 +220,7 @@ class UNET(nn.Module):
             x = self.ups[idx](x)
             skip_connection = skip_connections[idx // 2]
             if x.shape != skip_connection.shape:
-                raise ValueError(f'shapes unequal. Check your net: {self}')
+                raise ValueError(f'shapes unequal. Check your net ({x.shape} != {skip_connection.shape}): {self}')
                 x = TF.resize(x, size=skip_connection.shape[2:])
             concat_skip = torch.cat((skip_connection, x), dim=1)
             x = self.ups[idx + 1](concat_skip)

@@ -112,5 +112,5 @@ class TestUNet(unittest.TestCase):
         assert ds[0][1].shape == (1, *image_size)
 
         cfg = unet.utils.load_hyperparameters('conf/hyperparameters.yaml')
-        case = unet.Case(cfg, 'testrun')
+        case = unet.Case(cfg, working_dir='object_counting')
         case.run()

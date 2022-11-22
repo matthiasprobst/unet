@@ -119,4 +119,8 @@ class TestUNet(unittest.TestCase):
         case.run()
 
         self.assertTrue((__this_dir__ / 'data').exists())
-        self.assertTrue((__this_dir__ / 'runs').exists())
+        self.assertTrue((__this_dir__ / 'object_counting').exists())
+        self.assertTrue((__this_dir__ / 'object_counting/loss').exists())
+        self.assertTrue((__this_dir__ / 'object_counting/plots').exists())
+        self.assertTrue((__this_dir__ / 'object_counting/predicted_labels').exists())
+        self.assertTrue((__this_dir__ / 'object_counting/checkpoints').exists())

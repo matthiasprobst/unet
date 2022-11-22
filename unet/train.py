@@ -109,7 +109,7 @@ class Case:
     loss_dir: Union[pathlib.Path, None] = None
     checkpoints_dir: Union[pathlib.Path, None] = None
     plots_dir: Union[pathlib.Path, None] = None
-    prediced_labels_dir: Union[pathlib.Path, None] = None
+    predicted_labels_dir: Union[pathlib.Path, None] = None
     current_best_mean_abs_err: float = np.infty
     current_epoch: int = 0
     prediction_plot_class: PredictionPlot = PredictionPlot
@@ -131,10 +131,10 @@ class Case:
         else:
             self.checkpoints_dir = pathlib.Path(self.working_dir)
 
-        if self.prediced_labels_dir is None:
-            self.prediced_labels_dir = self.working_dir / 'prediced_labels'
+        if self.predicted_labels_dir is None:
+            self.predicted_labels_dir = self.working_dir / 'predicted_labels'
         else:
-            self.prediced_labels_dir = pathlib.Path(self.working_dir)
+            self.predicted_labels_dir = pathlib.Path(self.working_dir)
 
         if self.plots_dir is None:
             self.plots_dir = self.working_dir / 'plots'
@@ -147,7 +147,7 @@ class Case:
     @property
     def is_empty_case(self) -> bool:
         """if directory paths don't exist, case most likely is empty"""
-        for _dir in (self.working_dir, self.loss_dir, self.checkpoints_dir, self.prediced_labels_dir):
+        for _dir in (self.working_dir, self.loss_dir, self.checkpoints_dir, self.predicted_labels_dir):
             if not _dir.exists():
                 return True
 
@@ -157,7 +157,7 @@ class Case:
         return dict(working_dir=self.working_dir,
                     loss_dir=self.loss_dir,
                     checkpoints_dir=self.checkpoints_dir,
-                    prediced_labels_dir=self.prediced_labels_dir,
+                    predicted_labels_dir=self.predicted_labels_dir,
                     plots_dir=self.plots_dir,
                     )
 
@@ -308,7 +308,7 @@ class Case:
                         epoch,
                         val_loader,
                         model,
-                        folder=self.prediced_labels_dir,
+                        folder=self.predicted_labels_dir,
                         device=self.cfg.device,
                         predplot=self.prediction_plot_class
                     )

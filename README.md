@@ -1,6 +1,6 @@
-# Implementation of a U-NET
+# Implementation of an U-NET
 
-Implemetation of the U-NET Structure. Built and adjusted based on https://www.youtube.com/watch?v=IHq1t7NxS8k.
+Implemetation of the U-NET Structure. Built based on https://www.youtube.com/watch?v=IHq1t7NxS8k and modified further.
 
 ## Usage
 The image shape must be `(n, m, ny, nx)` where

@@ -147,16 +147,17 @@ def save_predictions_as_imgs(epochidx: int,
     model.eval()
 
     # get the first batch only:
-    input_images, true_denisty_map = next(iter(loader))
+    input_images, true_density_map = next(iter(loader))
+
     input_images = input_images.to(device=device)
-    true_denisty_maps = true_denisty_map.to(device)
+    true_density_maps = true_density_map.to(device=device)
     with torch.no_grad():
         preds = model(input_images)
 
     predicted_density_map = preds.cpu().detach().numpy().squeeze()
-    true_denisty_maps = true_denisty_maps.cpu().detach().numpy().squeeze()
+    true_density_maps = true_density_maps.cpu().detach().numpy().squeeze()
 
-    fig = predplot(input_images, true_denisty_maps, predicted_density_map).plot()
+    fig = predplot(input_images.cpu(), true_density_maps, predicted_density_map).plot()
 
     if isinstance(fig, (tuple, list)):
         fig_dir = pathlib.Path(folder) / f'pred_{epochidx:06d}'

@@ -8,7 +8,11 @@
 *.par
 *.pth
 *.h5
-*.yaml
+*.png
+*.pth.tar
+*events.*
+*loss.txt
+#*.yaml
 *.pylint
 
 # build

@@ -42,7 +42,7 @@ def train_one_epoch(loader, model, optimizer, loss_fn, scaler, device) -> float:
         optimizer.zero_grad()
 
         # foward
-        # make predition:
+        # make prediction:
         predictions = model(data)
         # compute loss
         loss = loss_fn(predictions, targets)
@@ -186,9 +186,40 @@ class Case:
         if self.cfg.device == 'cuda' and not torch.cuda.is_available():
             logger.info('CUDA is not available but set in the config. Switching device to CPU.')
             self.cfg.device = 'cpu'
-        # TODO: check input channel number!
-        model = UNET(in_channels=1,
-                     out_channels=1,
+
+        # get train and valid data:
+        train_filename = pathlib.Path(self.cfg.train_filename).resolve()
+        valid_filename = pathlib.Path(self.cfg.valid_filename).resolve()
+
+        for _name, _path in zip(('training', 'validation'),
+                                (train_filename, valid_filename)):
+            logger.debug('Loading %s data from %s', _name, _path)
+            if _path:
+                if not _path.exists():
+                    raise FileNotFoundError(f'Cannot find training file: {_path}')
+
+        train_loader, val_loader = get_loaders(
+            train_filename,
+            valid_filename,
+            num_workers=self.cfg.num_workers,
+            pin_memory=self.cfg.pin_memory,
+            batch_size=self.cfg.batch_size
+        )
+
+        _img0, _label0 = train_loader.dataset[0]
+        if 'in_channels' not in self.cfg or self.cfg.in_channels is None:
+            self.cfg.in_channels = _img0.shape[0]
+            logger.info(f'Set in_channels to {self.cfg.in_channels}')
+        if 'out_channels' not in self.cfg or self.cfg.out_channels is None:
+            self.cfg.out_channels = _label0.shape[0]
+            logger.info(f'Set out_channels to {self.cfg.out_channels}')
+        if not _img0.shape[0] == self.cfg.in_channels:
+            raise ValueError(f'Input channel is set to 1 but image has different size: {_img0.shape[0]}')
+        if not _label0.shape[0] == self.cfg.out_channels:
+            raise ValueError(f'Output channel is set to 1 but label has different size: {_label0.shape[0]}')
+
+        model = UNET(in_channels=self.cfg.in_channels,
+                     out_channels=self.cfg.out_channels,
                      features=self.cfg.features,
                      up_stride=self.cfg.up.stride,
                      up_kernel_size=self.cfg.up.kernel_size,
@@ -211,24 +242,6 @@ class Case:
                                         weight_decay=self.cfg.optimizer.opts.SGD.weight_decay)
         else:
             raise ValueError(f'Unknown optimizer: {self.cfg.optimizer}')
-
-        train_filename = pathlib.Path(self.cfg.train_filename).resolve()
-        valid_filename = pathlib.Path(self.cfg.valid_filename).resolve()
-
-        for _name, _path in zip(('training', 'validation'),
-                                (train_filename, valid_filename)):
-            logger.debug('Loading %s data from %s', _name, _path)
-            if _path:
-                if not _path.exists():
-                    raise FileNotFoundError(f'Cannot find training file: {_path}')
-
-        train_loader, val_loader = get_loaders(
-            train_filename,
-            valid_filename,
-            num_workers=self.cfg.num_workers,
-            pin_memory=self.cfg.pin_memory,
-            batch_size=self.cfg.batch_size
-        )
 
         scaler = torch.cuda.amp.GradScaler()
 

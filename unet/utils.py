@@ -43,7 +43,7 @@ def get_loaders(train_filepath: pathlib.Path,
                 valid_filepath: pathlib.Path,
                 batch_size: int, num_workers: int = 4,
                 pin_memory: bool = True,
-                make_gray_scale: bool = True) -> Tuple[DataLoader, DataLoader, DataLoader]:
+                make_gray_scale: bool = True) -> Tuple[DataLoader, DataLoader]:
     """Load data from HDF5."""
     train_filepath = pathlib.Path(train_filepath)
     valid_filepath = pathlib.Path(valid_filepath)

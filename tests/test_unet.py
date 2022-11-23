@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shutil
 import unittest
 import zipfile
 from typing import List, Tuple
@@ -124,3 +125,21 @@ class TestUNet(unittest.TestCase):
         self.assertTrue((__this_dir__ / 'object_counting/plots').exists())
         self.assertTrue((__this_dir__ / 'object_counting/predicted_labels').exists())
         self.assertTrue((__this_dir__ / 'object_counting/checkpoints').exists())
+
+    def test_unet_on_particle_images(self):
+        # get the test data
+        data_dir = __this_dir__ / 'data/piv_particle_images'
+        working_dir = __this_dir__ / 'object_counting'
+        if working_dir.exists():
+            shutil.rmtree(working_dir)
+
+        with h5py.File(data_dir / 'train.hdf') as h5:
+            ds = DatasetLoader(h5['images'][:], h5['labels'][:])
+            assert h5['images'].ndim == 3
+
+        img0, label0 = ds[0]  # get the first image and label
+        assert img0.shape == label0.shape
+
+        cfg = unet.utils.load_hyperparameters(__this_dir__ / 'conf/hyperparameters.yaml')
+        case = unet.Case(cfg, working_dir=working_dir)
+        case.run()

@@ -183,6 +183,10 @@ class Case:
         self.set_up_case()
 
         # init model:
+        if self.cfg.device == 'cuda' and not torch.cuda.is_available():
+            logger.info('CUDA is not available but set in the config. Switching device to CPU.')
+            self.cfg.device = 'cpu'
+        # TODO: check input channel number!
         model = UNET(in_channels=1,
                      out_channels=1,
                      features=self.cfg.features,

@@ -1,17 +1,16 @@
-import pathlib
-import warnings
-from dataclasses import dataclass
-from typing import Union, Dict, Tuple
-
 import hydra
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pathlib
 import torch.cuda.amp
+import warnings
+from dataclasses import dataclass
 from omegaconf import DictConfig
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from typing import Union, Dict, Tuple
 
 from ._logger import logger
 from .model import UNET
@@ -19,7 +18,8 @@ from .utils import (get_loaders,
                     save_checkpoint,
                     save_predictions_as_imgs,
                     load_checkpoint,
-                    PredictionPlot)
+                    PredictionPlot,
+                    load_hyperparameters)
 
 warnings.filterwarnings("ignore")
 matplotlib.use('TkAgg')
@@ -104,7 +104,7 @@ def validate_one_epoch(loader, model, loss_fn, device) -> Tuple[float, Dict]:
 @dataclass
 class Case:
     """Case class to control training and validation (tbd)"""
-    cfg: DictConfig
+    cfg: Union[str, pathlib.Path, DictConfig]
     working_dir: Union[pathlib.Path, None] = None
     loss_dir: Union[pathlib.Path, None] = None
     checkpoints_dir: Union[pathlib.Path, None] = None
@@ -116,6 +116,8 @@ class Case:
 
     def __post_init__(self):
         """post init call"""
+        if not isinstance(self.cfg, DictConfig):
+            self.cfg = load_hyperparameters(self.cfg)
         if self.working_dir is None:
             self.working_dir = pathlib.Path().cwd()
         else:
